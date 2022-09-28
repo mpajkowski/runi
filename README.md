@@ -1,6 +1,6 @@
 # runi
 
-Simple program launcher
+![image](https://user-images.githubusercontent.com/14338722/192661296-cb4e3012-7207-4ea3-b6db-595b0f2a917d.png)
 
 ## Usage
 
