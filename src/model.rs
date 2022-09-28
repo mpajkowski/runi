@@ -81,7 +81,7 @@ impl Application {
         Ok(Some(Self::new(name.unwrap(), desc, exec.unwrap(), actions)))
     }
 
-    pub fn launch(&mut self) -> Result<()> {
+    pub fn exec(&self) -> Result<()> {
         let mut exec_split = self.exec.split_whitespace();
 
         let command = exec_split.next().unwrap();
@@ -111,17 +111,12 @@ impl Application {
         unreachable!()
     }
 
-    pub fn matches(&self, filter: &str) -> bool {
-        let matches_name = || self.name.to_lowercase().contains(filter);
-        let matches_exec = || self.exec.to_lowercase().contains(filter);
-        let matches_desc = || {
-            self.desc
-                .as_ref()
-                .map(|x| x.to_lowercase().contains(filter))
-                .unwrap_or(false)
-        };
+    pub fn score(&self, filter: &str) -> f64 {
+        let comp = |string| strsim::normalized_levenshtein(string, filter);
 
-        matches_name() || matches_exec() || matches_desc()
+        comp(&self.name.to_lowercase())
+            .max(comp(&self.exec.to_lowercase()) * 0.5)
+            .max(self.desc.as_deref().map(comp).unwrap_or_default() * 0.25)
     }
 }
 

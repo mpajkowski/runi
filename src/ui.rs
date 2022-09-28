@@ -26,10 +26,10 @@ struct LauncherApp {
     apps: Vec<Application>,
 
     /// Indices of filtered applications (points to self.apps)
-    filtered_apps: Vec<usize>,
+    filtered_apps: Vec<(usize, f64)>,
 
     /// Index of selected application (points to self.filtered_apps)
-    selected: Option<usize>,
+    selected: usize,
 
     /// Search field state
     search_state: String,
@@ -41,7 +41,7 @@ impl LauncherApp {
             apps_thread: Some(apps_thread),
             apps: vec![],
             filtered_apps: vec![],
-            selected: None,
+            selected: 0,
             search_state: String::with_capacity(16),
         }
     }
@@ -49,7 +49,7 @@ impl LauncherApp {
     fn ensure_init(&mut self) -> Result<()> {
         if let Some(apps_thread) = self.apps_thread.take() {
             let apps = apps_thread.join().expect("failed to join apps_thread")?;
-            let filtered_apps = (0..apps.len()).collect();
+            let filtered_apps = (0..apps.len()).map(|idx| (idx, 1.0)).collect();
             self.apps = apps;
             self.filtered_apps = filtered_apps;
         }
@@ -58,25 +58,31 @@ impl LauncherApp {
     }
 
     fn on_search_update(&mut self) {
-        let prev_selected_idx = self.selected.take().map(|idx| self.filtered_apps[idx]);
+        if self.search_state.is_empty() {
+            self.filtered_apps = (0..self.apps.len()).map(|idx| (idx, 1.0)).collect();
+            self.selected = 0;
+            return;
+        }
 
         self.filtered_apps.clear();
 
         for (app_idx, app) in self.apps.iter().enumerate() {
-            if app.matches(&self.search_state) {
-                self.filtered_apps.push(app_idx);
+            let score = app.score(&self.search_state);
 
-                // retain previous selection (if any)
-                if prev_selected_idx == Some(app_idx) {
-                    self.selected = Some(self.filtered_apps.len() - 1);
-                }
+            if score > 0.05 {
+                self.filtered_apps.push((app_idx, score));
             }
         }
 
-        // always select exact match
-        if self.filtered_apps.len() == 1 {
-            self.selected = Some(0);
-        }
+        // sort by score (reversed order)
+        self.filtered_apps.sort_by(|a, b| b.1.total_cmp(&a.1));
+        self.selected = 0;
+    }
+
+    pub fn exec_app(&self) {
+        self.apps[self.filtered_apps[self.selected].0]
+            .exec()
+            .expect("Failed to launch application");
     }
 }
 
@@ -96,23 +102,11 @@ impl eframe::App for LauncherApp {
             if input.key_pressed(Key::Escape) {
                 frame.close();
             } else if input.key_pressed(Key::ArrowDown) {
-                let selected = match self.selected {
-                    None => 0,
-                    Some(x) => (x + 1).min(self.filtered_apps.len().saturating_sub(1)),
-                };
-                self.selected = Some(selected);
+                self.selected = (self.selected + 1).min(self.filtered_apps.len().saturating_sub(1));
             } else if input.key_pressed(Key::ArrowUp) {
-                let selected = match self.selected {
-                    None => 0,
-                    Some(x) => x.saturating_sub(1),
-                };
-                self.selected = Some(selected);
+                self.selected = self.selected.saturating_sub(1);
             } else if input.key_pressed(Key::Enter) {
-                if let Some(selected) = self.selected.as_ref() {
-                    self.apps[self.filtered_apps[*selected]]
-                        .launch()
-                        .expect("Failed to launch application");
-                }
+                self.exec_app();
             }
         }
 
@@ -180,15 +174,13 @@ impl eframe::App for LauncherApp {
 
                 // draw filtered applications
                 application_list_ui.vertical(|ui| {
-                    for (loop_idx, app_idx) in self.filtered_apps.iter().enumerate() {
-                        let current = Some(loop_idx);
-
+                    for (loop_idx, (app_idx, _)) in self.filtered_apps.iter().enumerate() {
                         let app_name = &self.apps[*app_idx].name;
                         let mut app_name_widget =
                             RichText::new(app_name).text_style(TextStyle::Heading);
 
-                        // apply highlight for selected application
-                        if self.selected == current {
+                        // apply highlight to selected application
+                        if loop_idx == self.selected {
                             app_name_widget = app_name_widget.background_color(Color32::DARK_RED);
                         }
 
@@ -196,7 +188,8 @@ impl eframe::App for LauncherApp {
                             Label::new(app_name_widget).sense(Sense::click()).ui(ui);
 
                         if select_response.clicked() {
-                            self.selected = current;
+                            self.selected = loop_idx;
+                            self.exec_app();
                         }
                     }
                 });
