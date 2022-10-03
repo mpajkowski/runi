@@ -16,5 +16,5 @@ Requirements:
 Just clone this repo and issue following command:
 
 ```sh
-cargo install --release .
+cargo install --path .
 ```
