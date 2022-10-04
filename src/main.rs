@@ -30,7 +30,8 @@ fn main() -> Result<()> {
 }
 
 fn apps_dirs() -> Result<Vec<PathBuf>> {
-    let xdg_data_dirs = env::var("XDG_DATA_DIRS")?;
+    let xdg_data_dirs =
+        env::var("XDG_DATA_DIRS").unwrap_or_else(|_| String::from("/usr/local/share/:/usr/share/"));
 
     let mut apps_dirs = xdg_data_dirs
         .split(":")
