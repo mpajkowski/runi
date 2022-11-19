@@ -1,7 +1,9 @@
 pub mod model;
 mod ui;
 
-use std::{env, path::PathBuf, str::FromStr, thread};
+use walkdir::WalkDir;
+
+use std::{borrow::Cow, env, path::PathBuf, thread};
 
 use anyhow::Result;
 
@@ -11,13 +13,22 @@ fn main() -> Result<()> {
 
         let mut applications = app_dirs
             .iter()
-            .filter_map(|path| std::fs::read_dir(path).ok())
-            .flatten()
+            .flat_map(|path| WalkDir::new(path).into_iter())
             .filter_map(|file| file.ok())
-            .map(|file| file.path())
-            .filter(|path| path.extension().and_then(|x| x.to_str()) == Some("desktop"))
-            .filter_map(|file| model::Application::from_freedesktop_file(file).transpose())
-            .collect::<Result<Vec<_>>>()?;
+            .filter(|file| file.path().extension().and_then(|x| x.to_str()) == Some("desktop"))
+            .filter_map(|file| {
+                let path = file.path();
+                let app = model::Application::from_freedesktop_file(path);
+
+                match app {
+                    Ok(app) => app,
+                    Err(err) => {
+                        eprintln!("Failed to parse path: {:?}, err: {err}", path.display());
+                        None
+                    }
+                }
+            })
+            .collect::<Vec<_>>();
 
         applications.sort_by_cached_key(|x| x.name.clone());
 
@@ -30,26 +41,26 @@ fn main() -> Result<()> {
 }
 
 fn apps_dirs() -> Result<Vec<PathBuf>> {
-    let xdg_data_dirs =
-        env::var("XDG_DATA_DIRS").unwrap_or_else(|_| String::from("/usr/local/share/:/usr/share/"));
+    let xdg_data_dirs = env::var("XDG_DATA_DIRS")
+        .map(Cow::Owned)
+        .unwrap_or_else(|_| Cow::Borrowed("/usr/local/share/:/usr/share/"));
 
-    let mut apps_dirs = xdg_data_dirs
-        .split(":")
-        .map(|d| PathBuf::from_str(d).map_err(|err| err.into()))
-        .collect::<Result<Vec<_>>>()?;
+    let apps_dirs = xdg_data_dirs
+        .split(':')
+        .map(|d| anyhow::Ok(PathBuf::from(d)));
 
-    let xdg_data_home = match env::var("XDG_DATA_HOME") {
-        Ok(p) => PathBuf::from_str(&p)?,
-        Err(_) => {
+    let xdg_data_home = env::var("XDG_DATA_HOME")
+        .map(|x| anyhow::Ok(PathBuf::from(x)))
+        .unwrap_or_else(|_| {
             let home_dir = env::var("HOME")?;
-            let mut xdg_data_home = PathBuf::from_str(&home_dir)?;
+            let mut xdg_data_home = PathBuf::from(&home_dir);
             xdg_data_home.push(".local/share");
-            xdg_data_home
-        }
-    };
 
-    apps_dirs.push(xdg_data_home);
-    apps_dirs.iter_mut().for_each(|d| d.push("applications"));
+            anyhow::Ok(xdg_data_home)
+        });
 
-    Ok(apps_dirs)
+    apps_dirs
+        .chain([xdg_data_home])
+        .map(|res| res.map(|dir| dir.join("applications")))
+        .collect::<Result<Vec<_>>>()
 }
