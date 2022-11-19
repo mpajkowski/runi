@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=Guitar Pro 7
+Exec=env WINEPREFIX="/home/marcin/.wine" wine C:\\\\ProgramData\\\\Microsoft\\\\Windows\\\\Start\\ Menu\\\\Programs\\\\Guitar\\ Pro\\ 7\\\\Guitar\\ Pro\\ 7.lnk
+Type=Application
+StartupNotify=true
+Path=/home/marcin/.wine/dosdevices/c:/Program Files (x86)/Arobas Music/Guitar Pro 7
+Icon=2658_GuitarPro7.0
