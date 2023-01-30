@@ -16,6 +16,8 @@ pub struct Application {
     pub exec: Exec,
     pub path: Option<String>,
     pub actions: Vec<Action>,
+    name_lower: String,
+    exec_lower: String,
 }
 
 #[derive(Debug, Default, Clone)]
@@ -32,12 +34,17 @@ impl Application {
         path: Option<String>,
         actions: Vec<Action>,
     ) -> Self {
+        let name_lower = name.to_lowercase();
+        let exec_lower = exec.cmd.to_lowercase();
+
         Self {
             name,
             desc,
             exec,
             path,
             actions,
+            name_lower,
+            exec_lower,
         }
     }
 
@@ -125,11 +132,17 @@ impl Application {
     }
 
     pub fn score(&self, filter: &str) -> f64 {
-        let comp = |string| strsim::normalized_levenshtein(string, filter);
+        let filter = filter.to_lowercase();
 
-        comp(&self.name.to_lowercase())
-            .max(comp(&self.exec.cmd) * 0.5)
-            .max(self.desc.as_deref().map(comp).unwrap_or_default() * 0.25)
+        let contains = |string: &str| string.contains(&filter);
+
+        if contains(&self.name_lower) || contains(&self.exec_lower) {
+            return 1.0;
+        }
+
+        let comp = |string| strsim::normalized_levenshtein(string, &filter);
+
+        comp(&self.name_lower).max(comp(&self.exec_lower) * 0.5)
     }
 }
 

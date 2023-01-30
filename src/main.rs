@@ -30,7 +30,7 @@ fn main() -> Result<()> {
             })
             .collect::<Vec<_>>();
 
-        applications.sort_by_cached_key(|x| x.name.clone());
+        applications.sort_by(|l, r| l.name.cmp(&r.name));
 
         anyhow::Ok(applications)
     });
