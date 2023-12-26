@@ -12,11 +12,13 @@ pub fn run_ui(apps_thread: JoinHandle<Result<Vec<Application>>>) {
         ..Default::default()
     };
 
-    eframe::run_native(
+    if let Err(err) = eframe::run_native(
         env!("CARGO_PKG_NAME"),
         options,
         Box::new(|_cc| Box::new(LauncherApp::new(apps_thread))),
-    );
+    ) {
+        eprintln!("UI error: {err}");
+    }
 }
 
 struct LauncherApp {
@@ -101,29 +103,33 @@ impl LauncherApp {
     }
 
     fn check_input(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) -> Result<()> {
-        let input = ctx.input();
-
-        if input.key_pressed(Key::Escape) {
-            if self.error.is_some() {
-                self.reset_error();
-            } else {
-                frame.close();
+        ctx.input(|input| {
+            if input.key_pressed(Key::Escape) {
+                if self.error.is_some() {
+                    self.reset_error();
+                } else {
+                    frame.close();
+                }
+            } else if input.key_pressed(Key::ArrowDown) {
+                println!("kpdown");
+                self.selected = (self.selected + 1).min(self.filtered_apps.len().saturating_sub(1));
+                println!("Selected: {}", self.selected);
+            } else if input.key_pressed(Key::ArrowUp) {
+                println!("kpup");
+                self.selected = self.selected.saturating_sub(1);
+                println!("Selected: {}", self.selected);
+            } else if input.key_pressed(Key::Enter) {
+                self.exec_app()?;
             }
-        } else if input.key_pressed(Key::ArrowDown) {
-            self.selected = (self.selected + 1).min(self.filtered_apps.len().saturating_sub(1));
-        } else if input.key_pressed(Key::ArrowUp) {
-            self.selected = self.selected.saturating_sub(1);
-        } else if input.key_pressed(Key::Enter) {
-            self.exec_app()?;
-        }
 
-        Ok(())
+            Ok(())
+        })
     }
 }
 
 impl eframe::App for LauncherApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> egui::Rgba {
-        egui::Rgba::TRANSPARENT // Make sure we don't paint anything behind the rounded corners
+    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+        egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
     }
 
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
@@ -189,11 +195,10 @@ impl eframe::App for LauncherApp {
                 );
 
                 // always focus on search
-                {
-                    let mut memory = ctx.memory();
+                ctx.memory_mut(|memory| {
                     memory.request_focus(search_response.id);
                     memory.lock_focus(search_response.id, true);
-                }
+                });
 
                 if search_response.changed() {
                     self.on_search_update();
