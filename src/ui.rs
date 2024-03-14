@@ -1,14 +1,17 @@
+use crate::config;
 use crate::model::Application;
 use anyhow::{Context, Result};
 use egui::*;
 use std::{thread::JoinHandle, vec};
 
-pub fn run_ui(apps_thread: JoinHandle<Result<Vec<Application>>>) {
+pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>) {
     let options = eframe::NativeOptions {
-        decorated: false,
-        transparent: true,
-        resizable: false,
-        always_on_top: true,
+        window_builder: Some(Box::new(|v: ViewportBuilder| {
+            v.with_decorations(true)
+                .with_transparent(true)
+                .with_resizable(false)
+                .with_always_on_top()
+        })),
         ..Default::default()
     };
 
@@ -17,13 +20,13 @@ pub fn run_ui(apps_thread: JoinHandle<Result<Vec<Application>>>) {
         options,
         Box::new(|_cc| Box::new(LauncherApp::new(apps_thread))),
     ) {
-        eprintln!("UI error: {err}");
+        log::error!("UI error: {err}");
     }
 }
 
 struct LauncherApp {
     /// Application discovery thread
-    apps_thread: Option<JoinHandle<Result<Vec<Application>>>>,
+    apps_thread: Option<JoinHandle<Vec<Application>>>,
 
     /// Application list
     apps: Vec<Application>,
@@ -42,7 +45,7 @@ struct LauncherApp {
 }
 
 impl LauncherApp {
-    fn new(apps_thread: JoinHandle<Result<Vec<Application>>>) -> Self {
+    fn new(apps_thread: JoinHandle<Vec<Application>>) -> Self {
         Self {
             apps_thread: Some(apps_thread),
             apps: vec![],
@@ -61,15 +64,13 @@ impl LauncherApp {
         Ok(())
     }
 
-    fn ensure_init(&mut self) -> Result<()> {
+    fn ensure_init(&mut self) {
         if let Some(apps_thread) = self.apps_thread.take() {
-            let apps = apps_thread.join().expect("failed to join apps_thread")?;
+            let apps = apps_thread.join().expect("failed to join apps_thread");
             let filtered_apps = (0..apps.len()).map(|idx| (idx, 1.0)).collect();
             self.apps = apps;
             self.filtered_apps = filtered_apps;
         }
-
-        Ok(())
     }
 
     fn on_search_update(&mut self) {
@@ -102,40 +103,52 @@ impl LauncherApp {
         self.error = None;
     }
 
-    fn check_input(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) -> Result<()> {
-        ctx.input(|input| {
+    fn check_input(&mut self, ctx: &egui::Context) -> Result<()> {
+        let prev_selected = self.selected;
+
+        let close = ctx.input(|input| {
+            let mut close = false;
+
             if input.key_pressed(Key::Escape) {
                 if self.error.is_some() {
                     self.reset_error();
                 } else {
-                    frame.close();
+                    close = true;
                 }
             } else if input.key_pressed(Key::ArrowDown) {
-                println!("kpdown");
                 self.selected = (self.selected + 1).min(self.filtered_apps.len().saturating_sub(1));
-                println!("Selected: {}", self.selected);
             } else if input.key_pressed(Key::ArrowUp) {
-                println!("kpup");
                 self.selected = self.selected.saturating_sub(1);
-                println!("Selected: {}", self.selected);
             } else if input.key_pressed(Key::Enter) {
                 self.exec_app()?;
             }
 
-            Ok(())
-        })
+            anyhow::Ok(close)
+        })?;
+
+        // FIXME: move the cursor to the (0, 0) coordinates of frame if app selection was changed
+        // by keyboard event
+        if prev_selected != self.selected {
+            ctx.send_viewport_cmd(ViewportCommand::CursorPosition(Pos2 { x: 0.0, y: 0.0 }));
+        }
+
+        if close {
+            ctx.send_viewport_cmd(ViewportCommand::Close);
+        }
+
+        Ok(())
     }
 }
 
 impl eframe::App for LauncherApp {
     fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
-        egui::Color32::TRANSPARENT.to_normalized_gamma_f32()
+        config::BACKGROUND_COLOR.to_normalized_gamma_f32()
     }
 
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
-        self.ensure_init().expect("Failed to initialize app");
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ensure_init();
 
-        if let Err(err) = self.check_input(ctx, frame) {
+        if let Err(err) = self.check_input(ctx) {
             self.on_error(err);
         }
 
@@ -197,7 +210,14 @@ impl eframe::App for LauncherApp {
                 // always focus on search
                 ctx.memory_mut(|memory| {
                     memory.request_focus(search_response.id);
-                    memory.lock_focus(search_response.id, true);
+                    memory.set_focus_lock_filter(
+                        search_response.id,
+                        EventFilter {
+                            tab: true,
+                            arrows: true,
+                            escape: false,
+                        },
+                    );
                 });
 
                 if search_response.changed() {
@@ -212,36 +232,52 @@ impl eframe::App for LauncherApp {
                 .shrink(8.0);
 
                 let mut application_list_ui = ui.child_ui(content_rect, *ui.layout());
+                ScrollArea::vertical().show(&mut application_list_ui, |ui| {
+                    // justify apps for better mouse interaction
+                    let list_layout = Layout::top_down(Align::Min).with_cross_justify(true);
 
-                // draw filtered applications
-                let result: InnerResponse<Result<(), anyhow::Error>> = application_list_ui
-                    .vertical(|ui| {
-                        for (selection, (app_idx, _)) in self.filtered_apps.iter().enumerate() {
-                            let app_name = &self.apps[*app_idx].name;
-                            let mut app_name_widget =
-                                RichText::new(app_name).text_style(TextStyle::Heading);
+                    // draw filtered applications
+                    let result: InnerResponse<Result<(), anyhow::Error>> =
+                        ui.with_layout(list_layout, |ui| {
+                            for (selection, (app_idx, _)) in self.filtered_apps.iter().enumerate() {
+                                let mut selected = false;
+                                let app_name = &self.apps[*app_idx].name;
+                                let mut app_name_widget =
+                                    RichText::new(app_name).text_style(TextStyle::Heading);
 
-                            // apply highlight to selected application
-                            if self.selected == selection {
-                                app_name_widget =
-                                    app_name_widget.background_color(Color32::DARK_RED);
+                                // apply highlight to selected application
+                                if self.selected == selection {
+                                    app_name_widget =
+                                        app_name_widget.background_color(config::SELECTION_COLOR);
+                                    selected = true;
+                                }
+
+                                let label = Label::new(app_name_widget).sense(Sense::click());
+                                let response = label.ui(ui);
+
+                                let clicked = response.clicked();
+                                let hovered = response.hovered();
+
+                                if selected {
+                                    response.scroll_to_me(None);
+                                }
+
+                                if hovered || clicked {
+                                    self.selected = selection;
+                                }
+
+                                if clicked {
+                                    return self.exec_app();
+                                }
                             }
 
-                            let select_response =
-                                Label::new(app_name_widget).sense(Sense::click()).ui(ui);
+                            anyhow::Ok(())
+                        });
 
-                            if select_response.clicked() {
-                                self.selected = selection;
-                                self.exec_app()?;
-                            }
-                        }
-
-                        anyhow::Ok(())
-                    });
-
-                if let Err(err) = result.inner {
-                    self.on_error(err)
-                }
+                    if let Err(err) = result.inner {
+                        self.on_error(err)
+                    }
+                })
             });
     }
 }

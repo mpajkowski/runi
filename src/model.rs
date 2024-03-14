@@ -2,6 +2,7 @@ use std::{
     borrow::Cow,
     env,
     fmt::Display,
+    hash::{Hash, Hasher},
     os::unix::process::CommandExt,
     path::{Path, PathBuf},
     str::{FromStr, SplitWhitespace},
@@ -9,7 +10,7 @@ use std::{
 
 use anyhow::{Context, Result};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq)]
 pub struct Application {
     pub name: String,
     pub desc: Option<String>,
@@ -20,7 +21,19 @@ pub struct Application {
     exec_lower: String,
 }
 
-#[derive(Debug, Default, Clone)]
+impl PartialEq for Application {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+    }
+}
+
+impl Hash for Application {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.name.hash(state);
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Action {
     pub name: String,
     pub exec: String,
@@ -113,7 +126,7 @@ impl Application {
     }
 
     pub fn exec(&self) -> Result<()> {
-        println!("Executing {}", self.exec);
+        log::info!("Executing {}", self.exec);
 
         let Exec { cmd, args } = &self.exec;
 

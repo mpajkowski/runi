@@ -1,66 +1,26 @@
-pub mod model;
+mod loader;
 mod ui;
 
-use walkdir::WalkDir;
+pub mod config;
+pub mod model;
 
-use std::{borrow::Cow, env, path::PathBuf, thread};
+use std::thread;
 
 use anyhow::Result;
 
+use crate::loader::load_apps;
+
 fn main() -> Result<()> {
-    let apps_thread = thread::spawn(|| {
-        let app_dirs = apps_dirs()?;
+    env_logger::builder()
+        .filter_level(log::LevelFilter::Info)
+        .parse_default_env()
+        .init();
 
-        let mut applications = app_dirs
-            .iter()
-            .flat_map(|path| WalkDir::new(path).into_iter())
-            .filter_map(|file| file.ok())
-            .filter(|file| file.path().extension().and_then(|x| x.to_str()) == Some("desktop"))
-            .filter_map(|file| {
-                let path = file.path();
-                let app = model::Application::from_freedesktop_file(path);
+    log::info!("init");
 
-                match app {
-                    Ok(app) => app,
-                    Err(err) => {
-                        eprintln!("Failed to parse path: {:?}, err: {err}", path.display());
-                        None
-                    }
-                }
-            })
-            .collect::<Vec<_>>();
-
-        applications.sort_by(|l, r| l.name.cmp(&r.name));
-
-        anyhow::Ok(applications)
-    });
+    let apps_thread = thread::spawn(load_apps);
 
     ui::run_ui(apps_thread);
 
     Ok(())
-}
-
-fn apps_dirs() -> Result<Vec<PathBuf>> {
-    let xdg_data_dirs = env::var("XDG_DATA_DIRS")
-        .map(Cow::Owned)
-        .unwrap_or_else(|_| Cow::Borrowed("/usr/local/share/:/usr/share/"));
-
-    let apps_dirs = xdg_data_dirs
-        .split(':')
-        .map(|d| anyhow::Ok(PathBuf::from(d)));
-
-    let xdg_data_home = env::var("XDG_DATA_HOME")
-        .map(|x| anyhow::Ok(PathBuf::from(x)))
-        .unwrap_or_else(|_| {
-            let home_dir = env::var("HOME")?;
-            let mut xdg_data_home = PathBuf::from(&home_dir);
-            xdg_data_home.push(".local/share");
-
-            anyhow::Ok(xdg_data_home)
-        });
-
-    apps_dirs
-        .chain([xdg_data_home])
-        .map(|res| res.map(|dir| dir.join("applications")))
-        .collect::<Result<Vec<_>>>()
 }
