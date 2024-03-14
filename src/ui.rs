@@ -64,12 +64,14 @@ impl LauncherApp {
         Ok(())
     }
 
-    fn ensure_init(&mut self) {
+    fn ensure_init(&mut self, ctx: &egui::Context) {
         if let Some(apps_thread) = self.apps_thread.take() {
             let apps = apps_thread.join().expect("failed to join apps_thread");
             let filtered_apps = (0..apps.len()).map(|idx| (idx, 1.0)).collect();
             self.apps = apps;
             self.filtered_apps = filtered_apps;
+
+            move_cursor_to_north_west(ctx);
         }
     }
 
@@ -106,7 +108,7 @@ impl LauncherApp {
     fn check_input(&mut self, ctx: &egui::Context) -> Result<()> {
         let prev_selected = self.selected;
 
-        let close = ctx.input(|input| {
+        let should_close = ctx.input(|input| {
             let mut close = false;
 
             if input.key_pressed(Key::Escape) {
@@ -129,11 +131,11 @@ impl LauncherApp {
         // FIXME: move the cursor to the (0, 0) coordinates of frame if app selection was changed
         // by keyboard event
         if prev_selected != self.selected {
-            ctx.send_viewport_cmd(ViewportCommand::CursorPosition(Pos2 { x: 0.0, y: 0.0 }));
+            move_cursor_to_north_west(ctx);
         }
 
-        if close {
-            ctx.send_viewport_cmd(ViewportCommand::Close);
+        if should_close {
+            close(ctx);
         }
 
         Ok(())
@@ -146,7 +148,7 @@ impl eframe::App for LauncherApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.ensure_init();
+        self.ensure_init(ctx);
 
         if let Err(err) = self.check_input(ctx) {
             self.on_error(err);
@@ -280,4 +282,12 @@ impl eframe::App for LauncherApp {
                 })
             });
     }
+}
+
+fn close(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(ViewportCommand::Close);
+}
+
+fn move_cursor_to_north_west(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(ViewportCommand::CursorPosition(Pos2 { x: 0.0, y: 0.0 }));
 }
