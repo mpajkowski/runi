@@ -70,8 +70,6 @@ impl LauncherApp {
             let filtered_apps = (0..apps.len()).map(|idx| (idx, 1.0)).collect();
             self.apps = apps;
             self.filtered_apps = filtered_apps;
-
-            move_cursor_to_north_west(ctx);
         }
     }
 
@@ -127,12 +125,6 @@ impl LauncherApp {
 
             anyhow::Ok(close)
         })?;
-
-        // FIXME: move the cursor to the (0, 0) coordinates of frame if app selection was changed
-        // by keyboard event
-        if prev_selected != self.selected {
-            move_cursor_to_north_west(ctx);
-        }
 
         if should_close {
             close(ctx);
@@ -286,8 +278,4 @@ impl eframe::App for LauncherApp {
 
 fn close(ctx: &egui::Context) {
     ctx.send_viewport_cmd(ViewportCommand::Close);
-}
-
-fn move_cursor_to_north_west(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::CursorPosition(Pos2 { x: 0.0, y: 0.0 }));
 }
