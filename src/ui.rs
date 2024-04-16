@@ -71,6 +71,8 @@ impl LauncherApp {
             self.apps = apps;
             self.filtered_apps = filtered_apps;
         }
+
+        ctx.output_mut(|o| o.cursor_icon = CursorIcon::None);
     }
 
     fn on_search_update(&mut self) {
@@ -246,22 +248,12 @@ impl eframe::App for LauncherApp {
                                     selected = true;
                                 }
 
-                                let label = Label::new(app_name_widget).sense(Sense::click());
+                                let label = Label::new(app_name_widget)
+                                    .sense(Sense::focusable_noninteractive());
                                 let response = label.ui(ui);
-
-                                let clicked = response.clicked();
-                                let hovered = response.hovered();
 
                                 if selected {
                                     response.scroll_to_me(None);
-                                }
-
-                                if hovered || clicked {
-                                    self.selected = selection;
-                                }
-
-                                if clicked {
-                                    return self.exec_app();
                                 }
                             }
 
