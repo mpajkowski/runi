@@ -1,20 +1,39 @@
-use std::{collections::HashSet, env, path::PathBuf};
+use std::{collections::HashSet, env, path::PathBuf, time::Instant};
 use walkdir::WalkDir;
 
-use crate::model::Application;
+use crate::{config::Config, model::Application};
 
 pub fn load_apps() -> Vec<Application> {
-    let AppDirs { system, user } = app_dirs();
+    let timer = Instant::now();
+    let AppDirs { system, user, home } = app_dirs();
+
+    let mut config = home
+        .and_then(|mut cfg_dir| {
+            cfg_dir.push(".config");
+            cfg_dir.push("runi");
+            cfg_dir.push("config.toml");
+
+            Config::load(&cfg_dir)
+                .map_err(|err| {
+                    log::warn!(
+                        "failed to load config from path {}: {err}",
+                        cfg_dir.display()
+                    )
+                })
+                .ok()
+        })
+        .unwrap_or_default();
+
     let mut set: HashSet<Application> = HashSet::new();
 
     for dir in system {
-        let apps = process_dir(dir);
+        let apps = process_dir(dir, &mut config);
 
         set.extend(apps);
     }
 
     if let Some(user) = user {
-        let user_apps = process_dir(user);
+        let user_apps = process_dir(user, &mut config);
 
         for app in user_apps {
             if let Some(system) = set.replace(app) {
@@ -26,12 +45,16 @@ pub fn load_apps() -> Vec<Application> {
     let mut apps: Vec<_> = set.into_iter().collect();
     apps.sort_unstable_by(|l, r| l.name.cmp(&r.name));
 
-    log::info!("loaded {} apps", apps.len());
+    log::info!(
+        "loaded {} apps in {}ms",
+        apps.len(),
+        timer.elapsed().as_millis()
+    );
 
     apps
 }
 
-fn process_dir(dir: PathBuf) -> Vec<Application> {
+fn process_dir(dir: PathBuf, cfg: &mut Config) -> Vec<Application> {
     let dir = dir.join("applications");
 
     log::info!("processing dir: {}", dir.display());
@@ -49,7 +72,7 @@ fn process_dir(dir: PathBuf) -> Vec<Application> {
 
         log::info!("processing file: {}", file.display());
 
-        let app = match Application::from_freedesktop_file(file) {
+        let mut app = match Application::from_freedesktop_file(file) {
             Ok(Some(app)) => app,
             Ok(None) => continue,
             Err(err) => {
@@ -57,6 +80,10 @@ fn process_dir(dir: PathBuf) -> Vec<Application> {
                 continue;
             }
         };
+
+        if let Some(patch) = cfg.patches.remove(file) {
+            app.exec = patch.exec;
+        }
 
         apps.push(app);
     }
@@ -67,6 +94,7 @@ fn process_dir(dir: PathBuf) -> Vec<Application> {
 struct AppDirs {
     system: Vec<PathBuf>,
     user: Option<PathBuf>,
+    home: Option<PathBuf>,
 }
 
 fn app_dirs() -> AppDirs {
@@ -79,15 +107,22 @@ fn app_dirs() -> AppDirs {
         ]
     };
 
+    let mut home_dir = None;
+
     let user = if let Ok(xdg_data_home) = env::var("XDG_DATA_HOME") {
         Some(PathBuf::from(xdg_data_home))
-    } else if let Ok(home_dir) = env::var("HOME") {
-        let mut dir = PathBuf::from(home_dir);
+    } else if let Ok(home) = env::var("HOME") {
+        let mut dir = PathBuf::from(home);
+        home_dir = Some(dir.clone());
         dir.push(".local/share");
         Some(dir)
     } else {
         None
     };
 
-    AppDirs { system, user }
+    AppDirs {
+        system,
+        user,
+        home: home_dir,
+    }
 }

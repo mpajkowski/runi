@@ -106,8 +106,6 @@ impl LauncherApp {
     }
 
     fn check_input(&mut self, ctx: &egui::Context) -> Result<()> {
-        let prev_selected = self.selected;
-
         let should_close = ctx.input(|input| {
             let mut close = false;
 
@@ -210,8 +208,9 @@ impl eframe::App for LauncherApp {
                         search_response.id,
                         EventFilter {
                             tab: true,
-                            arrows: true,
                             escape: false,
+                            horizontal_arrows: true,
+                            vertical_arrows: true,
                         },
                     );
                 });

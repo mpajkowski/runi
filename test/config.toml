@@ -1,0 +1,2 @@
+[patch."/usr/share/applications/signal-desktop.desktop"]
+exec = "alacritty -v"
