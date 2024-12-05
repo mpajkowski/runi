@@ -18,7 +18,7 @@ pub struct Application {
     pub path: Option<String>,
     pub actions: Vec<Action>,
     name_lower: String,
-    exec_lower: String,
+    exec_lower: Option<String>,
 }
 
 impl PartialEq for Application {
@@ -47,8 +47,13 @@ impl Application {
         path: Option<String>,
         actions: Vec<Action>,
     ) -> Self {
+        const EXEC_EXCLUDE: &[&str] = &["steam"];
         let name_lower = name.to_lowercase();
-        let exec_lower = exec.cmd.to_lowercase();
+        let use_exec_for_search = !EXEC_EXCLUDE
+            .iter()
+            .any(|exclude| exec.cmd.contains(exclude));
+
+        let exec_lower = use_exec_for_search.then_some(exec.cmd.to_lowercase());
 
         Self {
             name,
@@ -147,15 +152,16 @@ impl Application {
     pub fn score(&self, filter: &str) -> f64 {
         let filter = filter.to_lowercase();
 
-        let contains = |string: &str| string.contains(&filter);
+        let score_str = |string: &str| {
+            if string.contains(&filter) {
+                return 1.0;
+            }
 
-        if contains(&self.name_lower) || contains(&self.exec_lower) {
-            return 1.0;
-        }
+            strsim::normalized_levenshtein(string, &filter)
+        };
 
-        let comp = |string| strsim::normalized_levenshtein(string, &filter);
-
-        comp(&self.name_lower).max(comp(&self.exec_lower) * 0.5)
+        score_str(&self.name_lower)
+            .max(self.exec_lower.as_deref().map(score_str).unwrap_or(0.0) * 0.5)
     }
 }
 
