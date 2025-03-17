@@ -1,13 +1,13 @@
-use crate::config;
 use crate::model::Application;
+use crate::{Lock, config};
 use anyhow::{Context, Result};
 use egui::*;
 use std::{thread::JoinHandle, vec};
 
-pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>) {
+pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>, flock: Lock) {
     let options = eframe::NativeOptions {
         window_builder: Some(Box::new(|v: ViewportBuilder| {
-            v.with_decorations(true)
+            v.with_decorations(false)
                 .with_transparent(true)
                 .with_resizable(false)
                 .with_always_on_top()
@@ -18,13 +18,16 @@ pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>) {
     if let Err(err) = eframe::run_native(
         env!("CARGO_PKG_NAME"),
         options,
-        Box::new(|_cc| Box::new(LauncherApp::new(apps_thread))),
+        Box::new(|_cc| Box::new(LauncherApp::new(apps_thread, flock))),
     ) {
         log::error!("UI error: {err}");
     }
 }
 
 struct LauncherApp {
+    /// File lock
+    flock: Option<Lock>,
+
     /// Application discovery thread
     apps_thread: Option<JoinHandle<Vec<Application>>>,
 
@@ -45,8 +48,9 @@ struct LauncherApp {
 }
 
 impl LauncherApp {
-    fn new(apps_thread: JoinHandle<Vec<Application>>) -> Self {
+    fn new(apps_thread: JoinHandle<Vec<Application>>, flock: Lock) -> Self {
         Self {
+            flock: Some(flock),
             apps_thread: Some(apps_thread),
             apps: vec![],
             filtered_apps: vec![],
@@ -56,7 +60,9 @@ impl LauncherApp {
         }
     }
 
-    fn exec_app(&self) -> Result<()> {
+    fn exec_app(&mut self) -> Result<()> {
+        drop(self.flock.take());
+
         self.apps[self.filtered_apps[self.selected].0]
             .exec()
             .context("Failed to launch application")?;

@@ -1,3 +1,4 @@
+mod flock;
 mod loader;
 mod ui;
 
@@ -9,6 +10,7 @@ use std::thread;
 use anyhow::Result;
 
 use crate::loader::load_apps;
+pub use flock::Lock;
 
 fn main() -> Result<()> {
     env_logger::builder()
@@ -18,9 +20,13 @@ fn main() -> Result<()> {
 
     log::info!("init");
 
+    let Some(flock) = flock::Lock::obtain() else {
+        return Ok(());
+    };
+
     let apps_thread = thread::spawn(load_apps);
 
-    ui::run_ui(apps_thread);
+    ui::run_ui(apps_thread, flock);
 
     Ok(())
 }
