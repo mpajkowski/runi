@@ -5,16 +5,33 @@
 
 ## Usage
 
-Just type `runi` and select your choice from list
+Just bind `runi` to your favorite keyboard shortcut and select an app to launch.
 
-# Installation
+## Features
+
+* scans common paths for `.desktop` files
+* allows rewriting `Exec` value
+
+You can define exec overrides in `$HOME/.config/runi/runi.toml`
+
+### Example
+
+We want to launch some Electron app in native Wayland mode:
+
+```shell
+# `~/.config/runi/runi.toml`
+
+[patch."/usr/share/applications/my-electron-app.desktop"]
+exec = "my-electron-app --enable-features=UseOzonePlatform --ozone-platform=wayland -- %u"
+```
+
+
+## Installation
 
 Requirements:
 
-* Rust (tested on 1.64 stable)
+* Rust (tested on 1.85 stable)
 
-Just clone this repo and issue following command:
-
-```sh
-cargo install --path .
+```shell
+cargo install --git https://github.com/mpajkowski/runi.git
 ```
