@@ -1,32 +1,24 @@
 use std::{
     env,
     fs::{self, File},
-    os::unix::fs::OpenOptionsExt,
     path::PathBuf,
 };
 
-use nix::{
-    fcntl::{Flock, FlockArg},
-    libc::O_CLOEXEC,
-};
+pub struct Lock(Option<LockPriv>);
 
-pub struct Lock(Option<Flock<File>>, Option<PathBuf>);
+struct LockPriv {
+    file: File,
+    path: PathBuf,
+}
 
 impl Drop for Lock {
     fn drop(&mut self) {
-        let Some(f) = self.0.take() else {
+        let Some(LockPriv { file, path }) = self.0.take() else {
             return;
         };
 
-        let Ok(f) = f.unlock() else {
-            return;
-        };
-
-        drop(f);
-
-        if let Some(path) = &self.1 {
-            let _ = std::fs::remove_file(path);
-        }
+        let _ = file.unlock();
+        let _ = std::fs::remove_file(path);
     }
 }
 
@@ -41,21 +33,28 @@ impl Lock {
 
         log::debug!("flock file: {}", path.display());
 
-        let f = match fs::OpenOptions::new()
-            .create(true)
-            .write(true)
-            .custom_flags(O_CLOEXEC)
-            .open(&path)
-        {
+        let file = match File::create(&path) {
             Ok(f) => f,
             Err(err) => {
-                log::warn!("failed to open lock file {}: {err}", path.display());
-                return Some(Self(None, None));
+                log::warn!("failed to create a lock file {}: {err}", path.display());
+                return Some(Self::unlocked());
             }
         };
 
-        let flock = nix::fcntl::Flock::lock(f, FlockArg::LockExclusiveNonblock).ok()?;
+        if let Err(err) = file.try_lock() {
+            match err {
+                fs::TryLockError::Error(err) => {
+                    log::warn!("failed to lock a file {}: {err}", path.display());
+                    return Some(Self::unlocked());
+                }
+                fs::TryLockError::WouldBlock => return None,
+            }
+        }
 
-        Some(Self(Some(flock), Some(path)))
+        Some(Self(Some(LockPriv { file, path })))
+    }
+
+    pub const fn unlocked() -> Self {
+        Self(None)
     }
 }
