@@ -24,7 +24,11 @@ fn main() -> Result<()> {
         .map(|value| value.parse().unwrap())
         .unwrap_or_default();
 
-    log::info!("init, selected backend: {backend:?}");
+    log::info!(
+        "init, version: {}, selected backend: {:?}",
+        env!("CARGO_PKG_VERSION"),
+        backend
+    );
 
     let Some(flock) = flock::Lock::obtain() else {
         log::info!("another instance detected; exiting");
