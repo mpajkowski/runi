@@ -30,7 +30,8 @@ exec = "my-electron-app --enable-features=UseOzonePlatform --ozone-platform=wayl
 
 Requirements:
 
-* Rust (tested on 1.85 stable)
+* Rust 1.92 or newer
+* X11, or a Wayland compositor with `wlr-layer-shell` support
 
 ```shell
 cargo install --git https://github.com/mpajkowski/runi.git

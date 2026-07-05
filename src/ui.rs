@@ -1,30 +1,38 @@
 use crate::model::Application;
-use crate::{Lock, config};
-use anyhow::{Context, Result};
-use egui::*;
+use crate::{
+    Lock,
+    backend::{UiBackend, eframe, layer_shell},
+    config,
+};
+use anyhow::{Context as _, Result};
+use egui::{
+    Align, CentralPanel, CursorIcon, EventFilter, Frame, InnerResponse, Key, Label, Layout, Margin,
+    RichText, ScrollArea, Sense, Stroke, StrokeKind, TextEdit, TextStyle, Ui, UiBuilder, Widget,
+    vec2,
+};
 use std::{thread::JoinHandle, vec};
 
-pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>, flock: Lock) {
-    let options = eframe::NativeOptions {
-        window_builder: Some(Box::new(|v: ViewportBuilder| {
-            v.with_decorations(false)
-                .with_transparent(true)
-                .with_resizable(false)
-                .with_always_on_top()
-        })),
-        ..Default::default()
+pub fn run_ui(apps_thread: JoinHandle<Vec<Application>>, backend: UiBackend, flock: Lock) {
+    let app = LauncherApp::new(apps_thread, flock);
+
+    let run_backend = match backend {
+        UiBackend::LayerShell => layer_shell::run,
+        UiBackend::Eframe => eframe::run,
+        UiBackend::InferFromEnv => {
+            if std::env::var_os("WAYLAND_DISPLAY").is_some() {
+                layer_shell::run
+            } else {
+                eframe::run
+            }
+        }
     };
 
-    if let Err(err) = eframe::run_native(
-        env!("CARGO_PKG_NAME"),
-        options,
-        Box::new(|_cc| Box::new(LauncherApp::new(apps_thread, flock))),
-    ) {
+    if let Err(err) = run_backend(app) {
         log::error!("UI error: {err}");
     }
 }
 
-struct LauncherApp {
+pub(crate) struct LauncherApp {
     /// File lock
     flock: Option<Lock>,
 
@@ -45,6 +53,9 @@ struct LauncherApp {
 
     /// Error (if occurred)
     error: Option<String>,
+
+    /// Whether the layer-shell event loop should exit.
+    closing: bool,
 }
 
 impl LauncherApp {
@@ -57,6 +68,7 @@ impl LauncherApp {
             selected: 0,
             search_state: String::with_capacity(16),
             error: None,
+            closing: false,
         }
     }
 
@@ -133,22 +145,31 @@ impl LauncherApp {
         })?;
 
         if should_close {
-            close(ctx);
+            self.closing = true;
         }
 
         Ok(())
     }
 }
 
-impl eframe::App for LauncherApp {
-    fn clear_color(&self, _visuals: &egui::Visuals) -> [f32; 4] {
+impl LauncherApp {
+    pub fn clear_color(&self) -> [f32; 4] {
         config::BACKGROUND_COLOR.to_normalized_gamma_f32()
     }
 
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.ensure_init(ctx);
+    pub fn closing(&self) -> bool {
+        self.closing
+    }
 
-        if let Err(err) = self.check_input(ctx) {
+    pub fn close(&mut self) {
+        self.closing = true;
+    }
+
+    pub fn update(&mut self, root: &mut Ui) {
+        let ctx = root.ctx().clone();
+        self.ensure_init(&ctx);
+
+        if let Err(err) = self.check_input(&ctx) {
             self.on_error(err);
         }
 
@@ -157,22 +178,24 @@ impl eframe::App for LauncherApp {
                 .open(&mut true)
                 .title_bar(false)
                 .resizable(false)
-                .show(ctx, |ui| {
+                .show(&ctx, |ui| {
                     let message = format!("{err}\n\nPress <ESC> and try again");
                     let message = RichText::new(message).text_style(TextStyle::Heading);
                     Label::new(message).ui(ui);
                 });
         }
 
-        let text_color = ctx.style().visuals.text_color();
+        let text_color = ctx.global_style().visuals.text_color();
 
         // Height of the title bar
         let height = 32.0;
 
         CentralPanel::default()
-            .frame(Frame::none())
-            .show(ctx, |ui| {
-                ui.set_enabled(self.error.is_none());
+            .frame(Frame::NONE)
+            .show_inside(root, |ui| {
+                if self.error.is_some() {
+                    ui.disable();
+                }
                 let rect = ui.max_rect();
                 let painter = ui.painter();
 
@@ -180,8 +203,9 @@ impl eframe::App for LauncherApp {
                 painter.rect(
                     rect.shrink(1.0),
                     10.0,
-                    ctx.style().visuals.window_fill(),
+                    ctx.global_style().visuals.window_fill(),
                     Stroke::new(1.0, text_color),
+                    StrokeKind::Inside,
                 );
 
                 // Paint the line under the search
@@ -204,7 +228,8 @@ impl eframe::App for LauncherApp {
                     search_rect,
                     TextEdit::singleline(&mut self.search_state)
                         .font(TextStyle::Heading)
-                        .hint_text("🔎 Search"),
+                        .frame(Frame::NONE.inner_margin(Margin::symmetric(4, 2)))
+                        .hint_text(RichText::new("🔎 Search").text_style(TextStyle::Heading)),
                 );
 
                 // always focus on search
@@ -232,7 +257,8 @@ impl eframe::App for LauncherApp {
                 }
                 .shrink(8.0);
 
-                let mut application_list_ui = ui.child_ui(content_rect, *ui.layout());
+                let mut application_list_ui =
+                    ui.new_child(UiBuilder::new().max_rect(content_rect).layout(*ui.layout()));
                 ScrollArea::vertical().show(&mut application_list_ui, |ui| {
                     // justify apps for better mouse interaction
                     let list_layout = Layout::top_down(Align::Min).with_cross_justify(true);
@@ -271,8 +297,4 @@ impl eframe::App for LauncherApp {
                 })
             });
     }
-}
-
-fn close(ctx: &egui::Context) {
-    ctx.send_viewport_cmd(ViewportCommand::Close);
 }

@@ -70,7 +70,7 @@ fn process_dir(dir: PathBuf, cfg: &mut Config) -> Vec<Application> {
 
         let file = file.path();
 
-        log::info!("processing file: {}", file.display());
+        log::debug!("processing file: {}", file.display());
 
         let mut app = match Application::from_freedesktop_file(file) {
             Ok(Some(app)) => app,
