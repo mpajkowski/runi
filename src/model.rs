@@ -1,11 +1,9 @@
 use std::{
-    borrow::Cow,
-    env,
     fmt::Display,
     hash::{Hash, Hasher},
     os::unix::process::CommandExt,
-    path::{Path, PathBuf},
-    str::{FromStr, SplitWhitespace},
+    path::Path,
+    str::FromStr,
 };
 
 use anyhow::{Context, Result};
@@ -133,12 +131,11 @@ impl Application {
     pub fn exec(&self) -> Result<()> {
         log::info!("Executing {}", self.exec);
 
-        let Exec { cmd, args } = &self.exec;
+        let Exec { cmd } = &self.exec;
 
-        let path = which(cmd).context("Failed to find executable")?;
-
-        let mut command = std::process::Command::new(path);
-        command.args(args);
+        let mut command = std::process::Command::new("sh");
+        command.arg("-c");
+        command.arg(cmd);
 
         if let Some(path) = self.path.as_ref() {
             command.current_dir(path);
@@ -165,97 +162,38 @@ impl Application {
     }
 }
 
-fn which(executable: impl AsRef<Path>) -> Option<PathBuf> {
-    let paths = env::var_os("PATH")?;
-    let paths = env::split_paths(&paths);
+fn trim_arg(s: &str) -> &str {
+    let mut out = s;
+    [
+        "%f", "%F", "%u", "%U", "%d", "%D", "%n", "%N", "%i", "%c", "%v", "%m",
+    ]
+    .iter()
+    .for_each(|pat| out = out.trim_end_matches(pat));
 
-    for path in paths {
-        let absolute = path.join(&executable);
-        if absolute.is_file() {
-            return Some(absolute);
-        }
-    }
-
-    None
-}
-
-fn skip_arg(arg: impl AsRef<str>) -> bool {
-    matches!(
-        arg.as_ref(),
-        "%f" | "%F" | "%u" | "%U" | "%d" | "%D" | "%n" | "%N" | "%i" | "%c" | "%v" | "%m"
-    )
+    out
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Exec {
     pub cmd: String,
-    pub args: Vec<String>,
 }
 
 impl FromStr for Exec {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let sanitized = s.replace(r"\\\\", r"\").replace('"', "");
-
-        let mut iterator = ExecIterator::new(&sanitized);
-
-        let cmd = iterator.next().context("Command not found")?;
-        let args = iterator
-            .filter(|s| !skip_arg(s))
-            .map(Cow::into_owned)
-            .collect();
+        let sanitized = s.trim();
+        let sanitized = trim_arg(sanitized);
 
         Ok(Self {
-            cmd: cmd.to_string(),
-            args,
+            cmd: sanitized.to_string(),
         })
     }
 }
 
 impl Display for Exec {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Command: {}, Args: [{}]", self.cmd, self.args.join(", "))
-    }
-}
-
-struct ExecIterator<'a> {
-    split: SplitWhitespace<'a>,
-}
-
-impl<'a> ExecIterator<'a> {
-    fn new(s: &'a str) -> Self {
-        Self {
-            split: s.split_whitespace(),
-        }
-    }
-}
-
-impl<'a> Iterator for ExecIterator<'a> {
-    type Item = Cow<'a, str>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        use std::fmt::Write;
-
-        let val = self.split.next()?;
-
-        if !val.ends_with(r"\\") {
-            return Some(Cow::Borrowed(val));
-        }
-
-        let mut val = val.trim_end_matches(r"\\").to_string();
-
-        for next in self.split.by_ref() {
-            let continue_ = next.ends_with(r"\\");
-
-            write!(&mut val, " {}", next.trim_end_matches(r"\\")).ok();
-
-            if !continue_ {
-                return Some(Cow::Owned(val));
-            }
-        }
-
-        None
+        write!(f, "Command: {}", self.cmd)
     }
 }
 
@@ -277,7 +215,6 @@ mod test {
             application.exec,
             Exec {
                 cmd: "alacritty".to_string(),
-                args: vec![]
             }
         );
         assert_eq!(
@@ -302,12 +239,7 @@ mod test {
         assert_eq!(
             application.exec,
             Exec {
-                cmd: "env".to_string(),
-                args: vec![
-                    "WINEPREFIX=/home/marcin/.wine".to_string(),
-                    "wine".to_string(),
-                    r"C:\ProgramData\Microsoft\Windows\Start Menu\Programs\Guitar Pro 7\Guitar Pro 7.lnk".to_string(),
-                ],
+                cmd: r#"env WINEPREFIX="/home/marcin/.wine" wine C:\\\\ProgramData\\\\Microsoft\\\\Windows\\\\Start\\ Menu\\\\Programs\\\\Guitar\\ Pro\\ 7\\\\Guitar\\ Pro\\ 7.lnk"#.to_owned(),
             }
         );
     }

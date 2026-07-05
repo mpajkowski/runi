@@ -61,8 +61,7 @@ mod test {
             patch,
             Patch {
                 exec: Exec {
-                    cmd: "alacritty".to_owned(),
-                    args: vec!["-v".to_owned()]
+                    cmd: "alacritty -v".to_owned(),
                 }
             }
         );
