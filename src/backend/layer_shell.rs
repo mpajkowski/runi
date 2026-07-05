@@ -1,5 +1,7 @@
 use crate::ui::LauncherApp;
 use anyhow::{Context, Result};
+use calloop::{EventLoop, LoopHandle};
+use calloop_wayland_source::WaylandSource;
 use egui::{Event, Key, Modifiers, RawInput};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
@@ -33,9 +35,15 @@ const HEIGHT: u32 = 600;
 
 pub fn run(app: LauncherApp) -> Result<()> {
     let connection = Connection::connect_to_env().context("failed to connect to Wayland")?;
-    let (globals, mut events) =
+    let (globals, events) =
         registry_queue_init(&connection).context("failed to read Wayland globals")?;
     let queue = events.handle();
+    let mut event_loop = EventLoop::<State>::try_new().context("failed to create event loop")?;
+    WaylandSource::new(connection.clone(), events)
+        .insert(event_loop.handle())
+        .map_err(|error| {
+            anyhow::anyhow!("failed to register Wayland event source: {}", error.error)
+        })?;
 
     let compositor =
         CompositorState::bind(&globals, &queue).context("wl_compositor is unavailable")?;
@@ -69,12 +77,14 @@ pub fn run(app: LauncherApp) -> Result<()> {
         started: Instant::now(),
         input: Vec::new(),
         modifiers: Modifiers::default(),
+        connection,
+        loop_handle: event_loop.handle(),
     };
 
     while !state.app.closing() {
-        events
-            .blocking_dispatch(&mut state)
-            .context("Wayland event dispatch failed")?;
+        event_loop
+            .dispatch(None, &mut state)
+            .context("event dispatch failed")?;
     }
     Ok(())
 }
@@ -94,6 +104,8 @@ struct State {
     started: Instant,
     input: Vec<Event>,
     modifiers: Modifiers,
+    connection: Connection,
+    loop_handle: LoopHandle<'static, State>,
 }
 
 impl State {
@@ -144,13 +156,13 @@ impl State {
         }
     }
 
-    fn key(&mut self, event: KeyEvent, pressed: bool) {
+    fn key(&mut self, event: KeyEvent, pressed: bool, repeat: bool) {
         if let Some(key) = map_key(event.keysym) {
             self.input.push(Event::Key {
                 key,
                 physical_key: None,
                 pressed,
-                repeat: false,
+                repeat,
                 modifiers: self.modifiers,
             });
         }
@@ -163,6 +175,12 @@ impl State {
         {
             self.input.push(Event::Text(text));
         }
+    }
+
+    fn repeat_key(&mut self, event: KeyEvent) {
+        self.key(event, true, true);
+        let connection = self.connection.clone();
+        self.draw(&connection);
     }
 }
 
@@ -249,7 +267,16 @@ impl SeatHandler for State {
         capability: Capability,
     ) {
         if capability == Capability::Keyboard && self.keyboard.is_none() {
-            self.keyboard = self.seats.get_keyboard(queue, &seat, None).ok();
+            self.keyboard = self
+                .seats
+                .get_keyboard_with_repeat(
+                    queue,
+                    &seat,
+                    None,
+                    self.loop_handle.clone(),
+                    Box::new(|state, _, event| state.repeat_key(event)),
+                )
+                .ok();
         }
     }
 
@@ -299,7 +326,7 @@ impl KeyboardHandler for State {
         _: u32,
         event: KeyEvent,
     ) {
-        self.key(event, true);
+        self.key(event, true, false);
         self.draw(connection);
     }
 
@@ -311,7 +338,7 @@ impl KeyboardHandler for State {
         _: u32,
         event: KeyEvent,
     ) {
-        self.key(event, false);
+        self.key(event, false, false);
         self.draw(connection);
     }
 
@@ -323,7 +350,7 @@ impl KeyboardHandler for State {
         _: u32,
         event: KeyEvent,
     ) {
-        self.key(event, true);
+        self.key(event, true, true);
         self.draw(connection);
     }
 

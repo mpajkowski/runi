@@ -11,6 +11,8 @@ lto = "fat"
 
 [dependencies]
 anyhow = "1"
+calloop = "0.14"
+calloop-wayland-source = "0.4"
 egui = "0.34"
 eframe = { version = "0.34", default-features = false, features = ["glow", "x11", "wayland"] }
 env_logger = "0.10"

@@ -2124,6 +2124,8 @@ name = "runi"
 version = "2026.7.5"
 dependencies = [
  "anyhow",
+ "calloop 0.14.4",
+ "calloop-wayland-source 0.4.1",
  "eframe",
  "egui",
  "env_logger",
